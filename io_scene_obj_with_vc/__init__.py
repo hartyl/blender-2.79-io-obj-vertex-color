@@ -119,6 +119,8 @@ class ImportOBJ(bpy.types.Operator, ImportHelper, IOOBJOrientationHelper):
             default=0.0,
             )
 
+
+
     def execute(self, context):
         # print("Selected: " + context.active_object.name)
         from . import import_obj
@@ -172,7 +174,9 @@ class ImportOBJ(bpy.types.Operator, ImportHelper, IOOBJOrientationHelper):
         layout.prop(self, "axis_up")
 
         layout.prop(self, "use_image_search")
-        layout.prop(operator, 'use_colors')
+        # layout.prop(operator, 'use_colors')
+        layout.prop(self, 'use_colors')
+        layout.prop(self, 'use_empties')
 
 
 class ExportOBJ(bpy.types.Operator, ExportHelper, IOOBJOrientationHelper):
@@ -237,8 +241,13 @@ class ExportOBJ(bpy.types.Operator, ExportHelper, IOOBJOrientationHelper):
     use_colors = BoolProperty(
             name="Include Vertex Colors",
             description="Add RGB channel to the position attribute",
-            default=True,
+            default=False,
             )
+    use_empties = BoolProperty(
+           name="Include Empty Nodes",
+           description="Include empty nodes, their shape and size",
+           default=False,
+           )
     use_uvs = BoolProperty(
             name="Include UVs",
             description="Write out the active UV coordinates",
@@ -247,7 +256,7 @@ class ExportOBJ(bpy.types.Operator, ExportHelper, IOOBJOrientationHelper):
     use_materials = BoolProperty(
             name="Write Materials",
             description="Write out the MTL file",
-            default=True,
+            default=False,
             )
     use_triangles = BoolProperty(
             name="Triangulate Faces",
@@ -263,7 +272,7 @@ class ExportOBJ(bpy.types.Operator, ExportHelper, IOOBJOrientationHelper):
     use_vertex_groups = BoolProperty(
             name="Polygroups",
             description="",
-            default=False,
+            default=True,
             )
 
     # grouping group

@@ -24,10 +24,7 @@ import bpy
 import mathutils
 import bpy_extras.io_utils
 
-from bpy_extras.wm_utils.progress_report import (
-    ProgressReport,
-    ProgressReportSubstep,
-)
+from progress_report import ProgressReport, ProgressReportSubstep
 
 
 def name_compat(name):
@@ -280,7 +277,8 @@ def write_file(filepath, objects, scene,
                EXPORT_SMOOTH_GROUPS=False,
                EXPORT_SMOOTH_GROUPS_BITFLAGS=False,
                EXPORT_NORMALS=False,
-               EXPORT_COLORS=True,
+               EXPORT_COLORS=False,
+               EXPORT_EMPTIES=False,
                EXPORT_UV=True,
                EXPORT_MTL=True,
                EXPORT_APPLY_MODIFIERS=True,
@@ -345,7 +343,7 @@ def write_file(filepath, objects, scene,
                 fw('mtllib %s\n' % repr(os.path.basename(mtlfilepath))[1:-1])
 
             # Initialize totals, these are updated each object
-            totverts = totuvco = totno = 1
+            totalVerts = totuvco = totno = 1
 
             face_vert_index = 1
 
@@ -384,10 +382,23 @@ def write_file(filepath, objects, scene,
                     with ProgressReportSubstep(subprogress1, 6) as subprogress2:
                         uv_unique_count = no_unique_count = 0
 
+                        if ob.type == "ARMATURE":
+                            bones = ob.data.bones[:]
+                            bones.sort(key=(lambda a: a.name))
+                            for i, bone in enumerate(bones):
+                                fw('B %s\n' % bone.name)
+                            continue
+
+                        if ob.type == "EMPTY":
+                            ob_mat = EXPORT_GLOBAL_MATRIX * ob_mat
+                            if EXPORT_EMPTIES:
+                                fw('E %s %.6f %.6f %.6f %.6f\n' % (ob.empty_draw_type, ob_mat[0].w, ob_mat[1].w, ob_mat[2].w, ob.empty_draw_size))
+                            continue
+
                         # Nurbs curve support
                         if EXPORT_CURVE_AS_NURBS and test_nurbs_compat(ob):
                             ob_mat = EXPORT_GLOBAL_MATRIX * ob_mat
-                            totverts += write_nurb(fw, ob, ob_mat)
+                            totalVerts += write_nurb(fw, ob, ob_mat)
                             continue
                         # END NURBS
 
@@ -395,10 +406,8 @@ def write_file(filepath, objects, scene,
                             me = ob.to_mesh(scene, EXPORT_APPLY_MODIFIERS, calc_tessface=False,
                                             settings='RENDER' if EXPORT_APPLY_MODIFIERS_RENDER else 'PREVIEW')
                         except RuntimeError:
-                            me = None
-
-                        if me is None:
                             continue
+
 
                         # _must_ do this before applying transformation, else tessellation may differ
                         if EXPORT_TRI:
@@ -419,6 +428,17 @@ def write_file(filepath, objects, scene,
                             faceuv = False
 
                         me_verts = me.vertices[:]
+                        vertGroupNames = ob.vertex_groups.keys()
+# taccc
+                        # sort by group
+                        indexer = [[] for i in range(len(me_verts))]
+                        l = len(me_verts)
+                        me_verts.sort(key=(lambda a: a.index+a.groups[0].group*l))
+                        x=0
+                        for vert in me_verts:
+                            indexer[vert.index]=x
+                            x=x+1
+                        del x,l
 
                         if EXPORT_COLORS and me.vertex_colors:
                             me_colors = [0 for _ in me_verts]
@@ -516,12 +536,34 @@ def write_file(filepath, objects, scene,
                         subprogress2.step()
 
                         # Vert
-                        if EXPORT_COLORS:
+                        lastGroup = -1
+                        currentGroup = -1
+                        if EXPORT_COLORS and me.vertex_colors:
                             for i, v in enumerate(zip(me_verts, me_colors)):
+                                if len(v.groups)>0:
+                                    currentGroup = v.groups[0].group
+                                else:
+                                    currentGroup = -1
+                                if currentGroup != lastGroup:
+                                    lastGroup = currentGroup
+                                    if currentGroup == -1:
+                                        fw('g nan\n')
+                                    else:
+                                        fw('g %s\n' % vertGroupNames[currentGroup])
                                 values = v[0].co[:] + v[1].color[:3]
                                 fw('v %.6f %.6f %.6f %.6f %.6f %.6f\n' % values)
                         else:
                             for v in me_verts:
+                                if len(v.groups)>0:
+                                    currentGroup = v.groups[0].group
+                                else:
+                                    currentGroup = -1
+                                if currentGroup != lastGroup:
+                                    lastGroup = currentGroup
+                                    if currentGroup == -1:
+                                        fw('g nan\n')
+                                    else:
+                                        fw('g %s\n' % vertGroupNames[currentGroup])
                                 fw('v %.6f %.6f %.6f\n' % v.co[:])
 
                         subprogress2.step()
@@ -673,21 +715,25 @@ def write_file(filepath, objects, scene,
                                 else:  # was off now on
                                     fw('s off\n')
                                 contextSmooth = f_smooth
-
-                            f_v = [(vi, me_verts[v_idx], l_idx)
+# taggg
+                            #tempverts[x][0]
+                            #f_v = [(vi, me_verts[v_idx], l_idx)
+                            #f_v = [(vi, me_verts[tempverts[v_idx][0]], l_idx)
+                            #f_v = [(vi, me_verts[v_idx], l_idx,me_verts[v_idx].index)
+                            f_v = [(vi, me_verts[v_idx], l_idx, indexer[v_idx])
                                    for vi, (v_idx, l_idx) in enumerate(zip(f.vertices, f.loop_indices))]
 
                             fw('f')
                             if faceuv:
                                 if EXPORT_NORMALS:
-                                    for vi, v, li in f_v:
-                                        fw(" %d/%d/%d" % (totverts + v.index,
+                                    for vi, v, li, index in f_v:
+                                        fw(" %d/%d/%d" % (totalVerts + index,
                                                           totuvco + uv_face_mapping[f_index][vi],
                                                           totno + loops_to_normals[li],
                                                           ))  # vert, uv, normal
                                 else:  # No Normals
-                                    for vi, v, li in f_v:
-                                        fw(" %d/%d" % (totverts + v.index,
+                                    for vi, v, li, index in f_v:
+                                        fw(" %d/%d" % (totalVerts + index,
                                                        totuvco + uv_face_mapping[f_index][vi],
                                                        ))  # vert, uv
 
@@ -695,11 +741,11 @@ def write_file(filepath, objects, scene,
 
                             else:  # No UV's
                                 if EXPORT_NORMALS:
-                                    for vi, v, li in f_v:
-                                        fw(" %d//%d" % (totverts + v.index, totno + loops_to_normals[li]))
+                                    for vi, v, li, index in f_v:
+                                        fw(" %d//%d" % (totalVerts + index, totno + loops_to_normals[li]))
                                 else:  # No Normals
-                                    for vi, v, li in f_v:
-                                        fw(" %d" % (totverts + v.index))
+                                    for vi, v, li, index in f_v:
+                                        fw(" %d" % (totalVerts + index))
 
                             fw('\n')
 
@@ -709,10 +755,10 @@ def write_file(filepath, objects, scene,
                         if EXPORT_EDGES:
                             for ed in edges:
                                 if ed.is_loose:
-                                    fw('l %d %d\n' % (totverts + ed.vertices[0], totverts + ed.vertices[1]))
+                                    fw('l %d %d\n' % (totalVerts + ed.vertices[0], totalVerts + ed.vertices[1]))
 
                         # Make the indices global rather then per mesh
-                        totverts += len(me_verts)
+                        totalVerts += len(me_verts)
                         totuvco += uv_unique_count
                         totno += no_unique_count
 
@@ -742,6 +788,7 @@ def _write(context, filepath,
            EXPORT_SMOOTH_GROUPS_BITFLAGS,
            EXPORT_NORMALS,  # ok
            EXPORT_COLORS,
+           EXPORT_EMPTIES,
            EXPORT_UV,  # ok
            EXPORT_MTL,
            EXPORT_APPLY_MODIFIERS,  # ok
@@ -800,6 +847,7 @@ def _write(context, filepath,
                        EXPORT_SMOOTH_GROUPS_BITFLAGS,
                        EXPORT_NORMALS,
                        EXPORT_COLORS,
+                       EXPORT_EMPTIES,
                        EXPORT_UV,
                        EXPORT_MTL,
                        EXPORT_APPLY_MODIFIERS,
@@ -833,11 +881,12 @@ def save(context,
          use_triangles=False,
          use_edges=True,
          use_normals=False,
-         use_colors=True,
+         use_colors=False,
+         use_empties=False,
          use_smooth_groups=False,
          use_smooth_groups_bitflags=False,
          use_uvs=True,
-         use_materials=True,
+         use_materials=False,
          use_mesh_modifiers=True,
          use_mesh_modifiers_render=False,
          use_blen_objects=True,
@@ -859,6 +908,7 @@ def save(context,
            EXPORT_SMOOTH_GROUPS_BITFLAGS=use_smooth_groups_bitflags,
            EXPORT_NORMALS=use_normals,
            EXPORT_COLORS=use_colors,
+           EXPORT_EMPTIES=use_empties,
            EXPORT_UV=use_uvs,
            EXPORT_MTL=use_materials,
            EXPORT_APPLY_MODIFIERS=use_mesh_modifiers,
@@ -873,6 +923,7 @@ def save(context,
            EXPORT_ANIMATION=use_animation,
            EXPORT_GLOBAL_MATRIX=global_matrix,
            EXPORT_PATH_MODE=path_mode,
+           #EXPORT_EMPTIES=ususe_empties,
            )
 
     return {'FINISHED'}
