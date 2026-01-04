@@ -431,14 +431,14 @@ def write_file(filepath, objects, scene,
                         vertGroupNames = ob.vertex_groups.keys()
 # taccc
                         # sort by group
+                        #if EXPORT_POLYGROUPS:
                         indexer = [[] for i in range(len(me_verts))]
-                        l = len(me_verts)
-                        me_verts.sort(key=(lambda a: a.index+a.groups[0].group*l))
-                        x=0
-                        for vert in me_verts:
+                        if len(me_verts)>0 and me_verts[0].groups:
+                            l = len(me_verts)
+                            me_verts.sort(key=(lambda a: a.index+a.groups[0].group*l))
+                            del l
+                        for x, vert in enumerate(me_verts):
                             indexer[vert.index]=x
-                            x=x+1
-                        del x,l
 
                         if EXPORT_COLORS and me.vertex_colors:
                             me_colors = [0 for _ in me_verts]
@@ -540,9 +540,9 @@ def write_file(filepath, objects, scene,
                         currentGroup = -1
                         if EXPORT_COLORS and me.vertex_colors:
                             for i, v in enumerate(zip(me_verts, me_colors)):
-                                if len(v.groups)>0:
+                                try:
                                     currentGroup = v.groups[0].group
-                                else:
+                                except:
                                     currentGroup = -1
                                 if currentGroup != lastGroup:
                                     lastGroup = currentGroup
@@ -923,7 +923,6 @@ def save(context,
            EXPORT_ANIMATION=use_animation,
            EXPORT_GLOBAL_MATRIX=global_matrix,
            EXPORT_PATH_MODE=path_mode,
-           #EXPORT_EMPTIES=ususe_empties,
            )
 
     return {'FINISHED'}
